@@ -48,7 +48,7 @@ def upload():
         except Exception:
             print("ERROR ADDING TO DB")
 
-            # try:
+        try:
             new_job = {"id": blob_name, "user_email": user_email, "lang_id": lang_id, "blob_url": blob_url}
             new_job = json.dumps(new_job)
             queue_client.send_message(new_job)
