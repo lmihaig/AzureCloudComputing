@@ -1,2 +1,2 @@
+azure_storage==0.37.0
 Flask==2.2.2
-SpeechRecognition==3.9.0

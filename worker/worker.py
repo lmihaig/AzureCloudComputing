@@ -1,25 +1,48 @@
-import speech_recognition as sr
+import os
+import sys
+import azure.cognitiveservices.speech as speechsdk
+from azure.storage.queue import QueueClient, BinaryBase64EncodePolicy, BinaryBase64DecodePolicy
+from azure.communication.email import EmailClient, EmailContent, EmailAddress, EmailMessage, EmailRecipients
+from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from util import config
 
 
-def recognise_speech_from_file(recognizer, path, lang):
-    with sr.AudioFile(path) as audio_file:
-        audio = recognizer.record(audio_file)
+def send_email(user_email, job_result):
+    content = EmailContent(
+        subject="Test1",
+        plain_text="Test2",
+        html=f"<html><h1>Test3 {job_result}</h1></html>",
+    )
 
-    response = {"success": True, "error": None, "transcription": None}
-
-    try:
-        response["transcription"] = recognizer.recognize_google(audio, language=lang)
-    except sr.RequestError:
-        response["success"] = False
-        response["error"] = "API unavailable"
-    except sr.UnknownValueError:
-        response["error"] = "Unable to recognize speech"
+    address = EmailAddress(email=user_email, display_name="Customer Name")
+    message = EmailMessage(
+        sender="DoNotReply@dda96197-e05a-4d60-95eb-5adc518c42fb.azurecomm.net",
+        content=content,
+        recipients=EmailRecipients(to=[address]),
+    )
+    response = email_client.send(message)
 
     return response
 
 
 if __name__ == "__main__":
-    r = sr.Recognizer()
+    speech_config = speechsdk.SpeechConfig(subscription=config.SPEECH_SUBSCRIPTION, region=config.SPEECH_REGION)
+    queue_client = QueueClient.from_connection_string(config.STORE_CONN, config.QUEUE_NAME)
+    email_client = EmailClient.from_connection_string(config.EMAIL_CON)
+    
+    blob_service_client = BlobServiceClient.from_connection_string(config.STORE_CONN)
+    blob_client.get_blob_client(container=config.BLOB_NAME, blob=file_name)
 
-    resp = recognise_speech_from_file(r, "C:/Users/lmg/Desktop/audio_files_harvard.wav", "en-US")
-    print(resp)
+    while True:
+        job = queue_client.receive_message()
+        if not job:
+            continue
+
+        print(job)
+
+    speech_config.speech_recognition_language = "en-US"
+    audio_config = speechsdk.audio.AudioConfig(filename="C:/Users/lmg/Desktop/audio_files_harvard.wav")
+    speech_recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
+    result = speech_recognizer.recognize_once_async().get()
