@@ -41,20 +41,20 @@ def upload():
             blob_url = blob_client.url
         except Exception:
             print("ERROR UPLOADING BLOB")
+        else:
+            try:
+                new_job = {"id": blob_name, "user_email": user_email, "lang_id": lang_id, "blob_url": blob_url}
+                db_container.create_item(new_job)
+            except Exception:
+                print("ERROR ADDING TO DB")
+            else:
+                try:
+                    new_job = {"id": blob_name, "user_email": user_email, "lang_id": lang_id, "blob_url": blob_url}
+                    new_job = json.dumps(new_job)
+                    queue_client.send_message(new_job)
 
-        try:
-            new_job = {"id": blob_name, "user_email": user_email, "lang_id": lang_id, "blob_url": blob_url}
-            db_container.create_item(new_job)
-        except Exception:
-            print("ERROR ADDING TO DB")
-
-        try:
-            new_job = {"id": blob_name, "user_email": user_email, "lang_id": lang_id, "blob_url": blob_url}
-            new_job = json.dumps(new_job)
-            queue_client.send_message(new_job)
-
-        except Exception:
-            print("ERROR ADDING TO QUEUE")
+                except Exception:
+                    print("ERROR ADDING TO QUEUE")
 
     return render_template("web.html")
 

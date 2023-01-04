@@ -31,18 +31,15 @@ if __name__ == "__main__":
     speech_config = speechsdk.SpeechConfig(subscription=config.SPEECH_SUBSCRIPTION, region=config.SPEECH_REGION)
     queue_client = QueueClient.from_connection_string(config.STORE_CONN, config.QUEUE_NAME)
     email_client = EmailClient.from_connection_string(config.EMAIL_CON)
-    
     blob_service_client = BlobServiceClient.from_connection_string(config.STORE_CONN)
-    blob_client.get_blob_client(container=config.BLOB_NAME, blob=file_name)
 
-    while True:
-        job = queue_client.receive_message()
-        if not job:
-            continue
+    # while True:
+    job = queue_client.receive_message()
+    if not job:
+        continue
 
-        print(job)
+    print(job)
 
-    speech_config.speech_recognition_language = "en-US"
-    audio_config = speechsdk.audio.AudioConfig(filename="C:/Users/lmg/Desktop/audio_files_harvard.wav")
-    speech_recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
-    result = speech_recognizer.recognize_once_async().get()
+    # audio_config = speechsdk.audio.AudioConfig(filename="C:/Users/lmg/Desktop/audio_files_harvard.wav")
+    # speech_recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
+    # result = speech_recognizer.recognize_once_async().get()
