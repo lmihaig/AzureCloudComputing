@@ -1,3 +1,4 @@
+from multiprocessing import Process
 import os
 import sys
 import azure.cognitiveservices.speech as speechsdk
@@ -33,13 +34,7 @@ def send_email(user_email, job_result):
     return response
 
 
-def speech_to_text(id, lang_id, container_client):
-    filename = id + ".wav"
-    blob_client = container_client.get_blob_client(filename)
-
-    with open(filename, "wb") as audio_file:
-        audio_file.write(container_client.download_blob(filename).readall())
-
+def speech_to_text(filename, lang_id, speech_config):
     speech_config.speech_recognition_language = lang_id
     audio_config = speechsdk.audio.AudioConfig(filename=filename)
     speech_recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
@@ -68,6 +63,48 @@ def speech_to_text(id, lang_id, container_client):
     return result
 
 
+def process_audio(filename, lang_id, container_client, speech_config):
+    with open(filename, "wb") as audio_file:
+        print(f'{os.getpid()}: Creating temporary audio file {filename}.')
+        audio_file.write(container_client.download_blob(filename).readall())
+
+    try:
+        print(f'{os.getpid()}: Converting {filename} to text.')
+        result = speech_to_text(filename, lang_id, speech_config)
+    finally:
+        print(f'{os.getpid()}: Removing temporary file {filename}')
+        os.remove(filename)
+
+    return result
+
+
+def process_job(job, container_client, queue_client, speech_config):
+    job_details = json.loads(job.content)
+    print(f'{os.getpid()}: Processing job ', job_details)
+    id = job_details.get("id", 0)
+    user_email = job_details.get("user_email", 0)
+    lang_id = job_details.get("lang_id", 0)
+    blob_url = job_details.get("blob_url", 0)
+
+    filename = id + ".wav"
+    # TODO: make service
+    try:
+        result = process_audio(filename, lang_id, container_client, speech_config)
+    except Exception as e:
+        print(f"{os.getpid()}: Failed processing audio file {id}.")
+    else:
+        print(f'{os.getpid()}: Sending email.')
+        send_email(user_email, result)
+    finally:
+        print(f'{os.getpid()}: Deleting message from queue.')
+        queue_client.delete_message(job)
+        try:
+            print(f'{os.getpid()}: Deleting blob.')
+            container_client.delete_blob(filename)
+        except Exception as e:
+            print(f'{os.getpid()}: Could not delete blob. Error: ', e)
+
+
 if __name__ == "__main__":
     speech_config = speechsdk.SpeechConfig(subscription=config.SPEECH_SUBSCRIPTION, region=config.SPEECH_REGION)
     queue_client = QueueClient.from_connection_string(
@@ -80,20 +117,10 @@ if __name__ == "__main__":
     blob_service_client = BlobServiceClient.from_connection_string(config.STORE_CONN)
     container_client = blob_service_client.get_container_client(config.BLOB_NAME)
 
-    # while True:
-    job = queue_client.receive_message()
-    if not job:
-        print("AAAAAAA")
-
-    job_details = json.loads(job.content)
-    print(job_details)
-    id = job_details.get("id", 0)
-    user_email = job_details.get("user_email", 0)
-    lang_id = job_details.get("lang_id", 0)
-    blob_url = job_details.get("blob_url", 0)
-
-    # TODO: if succesful delete audio file, clear job from queue, clear file from blob, implement while loop to run endlessly, make service
-    result = speech_to_text(id, lang_id, container_client)
-    send_email(user_email, result)
-
-    # queue_client.delete_message(job.id, job.pop_receipt)
+    while True:
+        job = queue_client.receive_message(visibility_timeout=600)
+        if not job:
+            continue
+        # Jobul ramane in queue daca nu a putut fi creat un proces nou pentru el.
+        p = Process(target=process_job, args=(job, container_client, queue_client, speech_config))
+        p.start()

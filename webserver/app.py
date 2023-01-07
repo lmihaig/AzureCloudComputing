@@ -51,6 +51,7 @@ def upload():
                 try:
                     new_job = {"id": blob_name, "user_email": user_email, "lang_id": lang_id, "blob_url": blob_url}
                     new_job = json.dumps(new_job)
+                    # TODO: Update TTL for job? Default is 7 days
                     queue_client.send_message(new_job)
 
                 except Exception:
