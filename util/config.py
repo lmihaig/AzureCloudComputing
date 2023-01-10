@@ -13,6 +13,7 @@ COSMOS_KEY = client.get_secret("COSMOS-KEY").value
 
 STORE_CONN = client.get_secret("STORE-CONN").value
 BLOB_NAME = client.get_secret("BLOB-NAME").value
+TEXT_BLOB_CONTAINER = client.get_secret("TEXT-CONTAINER-NAME").value
 QUEUE_NAME = client.get_secret("QUEUE-NAME").value
 
 SPEECH_SUBSCRIPTION = client.get_secret("SPEECH-SUBSCRIPTION").value

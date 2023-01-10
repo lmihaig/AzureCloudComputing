@@ -4,7 +4,7 @@ import sys
 import azure.cognitiveservices.speech as speechsdk
 from azure.storage.queue import QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
 from azure.communication.email import EmailClient, EmailContent, EmailAddress, EmailMessage, EmailRecipients
-from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
+from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient, ContentSettings
 import json
 import requests
 import io
@@ -14,11 +14,18 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from util import config
 
 
-def send_email(user_email, job_result):
+def send_email(user_email, audio_file_link, text_file_link):
+    # TODO: schimb emailul, "Your STT request is ready. The links will be available until <data curenta + TTL-ul bloburilor>"
     content = EmailContent(
-        subject="Test1",
-        plain_text="Test2",
-        html=f"<html><h1>{job_result}</h1></html>",
+        subject="Your Speech to Text conversion is ready.",
+        plain_text="",
+        html=f'''
+        <html>
+            The links will expire in 7 days. <br/>
+            Audio file: <a href="{audio_file_link}">{audio_file_link}</a> <br/>
+            Text file:  <a href="{text_file_link}">{text_file_link}</a>
+        </html>
+        ''',
     )
     # TODO: make html pretty and detail explaination
 
@@ -78,7 +85,7 @@ def process_audio(filename, lang_id, container_client, speech_config):
     return result
 
 
-def process_job(job, container_client, queue_client, speech_config):
+def process_job(job, audio_container_client, text_container_client, queue_client, speech_config):
     job_details = json.loads(job.content)
     print(f'{os.getpid()}: Processing job ', job_details)
     id = job_details.get("id", 0)
@@ -87,25 +94,29 @@ def process_job(job, container_client, queue_client, speech_config):
     blob_url = job_details.get("blob_url", 0)
 
     filename = id + ".wav"
-    # TODO: make service
+    result_filename = id + "_result.txt"
     try:
-        result = process_audio(filename, lang_id, container_client, speech_config)
+        result = process_audio(filename, lang_id, audio_container_client, speech_config)
+        print('Uploading result as blob...', end=' ')
+        text_container_client.get_blob_client(result_filename).upload_blob(
+            result,
+            content_settings=ContentSettings(content_disposition=f"attachment;filename=\"{result_filename}\""))
+        print('Done.')
+        audio_file_link = "https://speechtotextstore.blob.core.windows.net/" + config.BLOB_NAME + "/" + filename
+        text_file_link = "https://speechtotextstore.blob.core.windows.net/" + config.TEXT_BLOB_CONTAINER + "/" + result_filename
     except Exception as e:
-        print(f"{os.getpid()}: Failed processing audio file {id}.")
+        print(f"{os.getpid()}: Failed processing audio file {id}.", e)
     else:
         print(f'{os.getpid()}: Sending email.')
-        send_email(user_email, result)
+        send_email(user_email, audio_file_link, text_file_link)
     finally:
         print(f'{os.getpid()}: Deleting message from queue.')
         queue_client.delete_message(job)
-        try:
-            print(f'{os.getpid()}: Deleting blob.')
-            container_client.delete_blob(filename)
-        except Exception as e:
-            print(f'{os.getpid()}: Could not delete blob. Error: ', e)
+        # TODO: returnez linkurile
 
 
 if __name__ == "__main__":
+    print('Initializing worker...', end=' ')
     speech_config = speechsdk.SpeechConfig(subscription=config.SPEECH_SUBSCRIPTION, region=config.SPEECH_REGION)
     queue_client = QueueClient.from_connection_string(
         config.STORE_CONN,
@@ -113,14 +124,18 @@ if __name__ == "__main__":
         message_encode_policy=TextBase64EncodePolicy(),
         message_decode_policy=TextBase64DecodePolicy(),
     )
+
     email_client = EmailClient.from_connection_string(config.EMAIL_CON)
     blob_service_client = BlobServiceClient.from_connection_string(config.STORE_CONN)
-    container_client = blob_service_client.get_container_client(config.BLOB_NAME)
-
+    audio_container_client = blob_service_client.get_container_client(config.BLOB_NAME)
+    text_container_client = blob_service_client.get_container_client(config.TEXT_BLOB_CONTAINER)
+    print('Done.')
+    
     while True:
         job = queue_client.receive_message(visibility_timeout=600)
         if not job:
+            time.sleep(5)
             continue
         # Jobul ramane in queue daca nu a putut fi creat un proces nou pentru el.
-        p = Process(target=process_job, args=(job, container_client, queue_client, speech_config))
+        p = Process(target=process_job, args=(job, audio_container_client, text_container_client, queue_client, speech_config))
         p.start()
