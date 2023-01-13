@@ -1,10 +1,12 @@
 from multiprocessing import Process
+from datetime import datetime, timedelta
 import os
 import sys
 import azure.cognitiveservices.speech as speechsdk
+from azure.identity import DefaultAzureCredential
 from azure.storage.queue import QueueClient, TextBase64EncodePolicy, TextBase64DecodePolicy
 from azure.communication.email import EmailClient, EmailContent, EmailAddress, EmailMessage, EmailRecipients
-from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient, ContentSettings
+from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient, ContentSettings, generate_blob_sas, BlobSasPermissions
 import json
 import requests
 import io
@@ -71,11 +73,11 @@ def speech_to_text(filename, lang_id, speech_config):
 
 
 def process_audio(filename, lang_id, container_client, speech_config):
-    with open(filename, "wb") as audio_file:
-        print(f'{os.getpid()}: Creating temporary audio file {filename}.')
-        audio_file.write(container_client.download_blob(filename).readall())
-
     try:
+        with open(filename, "wb") as audio_file:
+            print(f'{os.getpid()}: Creating temporary audio file {filename}.')
+            audio_data = container_client.download_blob(filename).readall()
+            audio_file.write(audio_data)
         print(f'{os.getpid()}: Converting {filename} to text.')
         result = speech_to_text(filename, lang_id, speech_config)
     finally:
@@ -85,7 +87,27 @@ def process_audio(filename, lang_id, container_client, speech_config):
     return result
 
 
-def process_job(job, audio_container_client, text_container_client, queue_client, speech_config):
+def generate_blob_link(blob_service_client, container_name, blob_name):
+    print(f'{os.getpid()}: Getting delegation key...')
+    delegation_key = blob_service_client.get_user_delegation_key(
+        key_start_time=datetime.utcnow(),
+        key_expiry_time=datetime.utcnow() + timedelta(days=7))
+    print(f'{os.getpid()}: Getting Blob SAS...')
+    sas_blob = generate_blob_sas(
+        account_name=config.ACCOUNT_NAME,
+        user_delegation_key=delegation_key,
+        container_name=container_name,
+        blob_name=blob_name,
+        permission=BlobSasPermissions(read=True),
+        expiry=datetime.utcnow() + timedelta(days=7))
+    
+    blob_link = ("https://" + config.ACCOUNT_NAME + ".blob.core.windows.net/" +
+                 container_name + "/" + blob_name + "?" + sas_blob)
+    return blob_link
+
+
+def process_job(job, blob_service_client, audio_container_client,
+                text_container_client, queue_client, speech_config):
     job_details = json.loads(job.content)
     print(f'{os.getpid()}: Processing job ', job_details)
     id = job_details.get("id", 0)
@@ -97,13 +119,13 @@ def process_job(job, audio_container_client, text_container_client, queue_client
     result_filename = id + "_result.txt"
     try:
         result = process_audio(filename, lang_id, audio_container_client, speech_config)
-        print('Uploading result as blob...', end=' ')
         text_container_client.get_blob_client(result_filename).upload_blob(
             result,
             content_settings=ContentSettings(content_disposition=f"attachment;filename=\"{result_filename}\""))
-        print('Done.')
-        audio_file_link = "https://speechtotextstore.blob.core.windows.net/" + config.BLOB_NAME + "/" + filename
-        text_file_link = "https://speechtotextstore.blob.core.windows.net/" + config.TEXT_BLOB_CONTAINER + "/" + result_filename
+
+        audio_file_link = generate_blob_link(blob_service_client, config.BLOB_NAME, filename)
+        text_file_link = generate_blob_link(blob_service_client, config.TEXT_BLOB_CONTAINER, result_filename)
+
     except Exception as e:
         print(f"{os.getpid()}: Failed processing audio file {id}.", e)
     else:
@@ -112,11 +134,12 @@ def process_job(job, audio_container_client, text_container_client, queue_client
     finally:
         print(f'{os.getpid()}: Deleting message from queue.')
         queue_client.delete_message(job)
-        # TODO: returnez linkurile
 
 
 if __name__ == "__main__":
-    print('Initializing worker...', end=' ')
+    account_url = "https://" + config.ACCOUNT_NAME + ".blob.core.windows.net"
+    blob_service_client = BlobServiceClient(account_url, credential=config.credential)
+
     speech_config = speechsdk.SpeechConfig(subscription=config.SPEECH_SUBSCRIPTION, region=config.SPEECH_REGION)
     queue_client = QueueClient.from_connection_string(
         config.STORE_CONN,
@@ -124,18 +147,16 @@ if __name__ == "__main__":
         message_encode_policy=TextBase64EncodePolicy(),
         message_decode_policy=TextBase64DecodePolicy(),
     )
-
     email_client = EmailClient.from_connection_string(config.EMAIL_CON)
-    blob_service_client = BlobServiceClient.from_connection_string(config.STORE_CONN)
     audio_container_client = blob_service_client.get_container_client(config.BLOB_NAME)
     text_container_client = blob_service_client.get_container_client(config.TEXT_BLOB_CONTAINER)
-    print('Done.')
-    
+
     while True:
         job = queue_client.receive_message(visibility_timeout=600)
         if not job:
             time.sleep(5)
             continue
         # Jobul ramane in queue daca nu a putut fi creat un proces nou pentru el.
-        p = Process(target=process_job, args=(job, audio_container_client, text_container_client, queue_client, speech_config))
+        p = Process(target=process_job, args=(job, blob_service_client, audio_container_client,
+                                              text_container_client, queue_client, speech_config))
         p.start()
