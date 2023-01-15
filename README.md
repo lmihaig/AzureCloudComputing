@@ -1,6 +1,6 @@
-# AzureCloudComputing
+## AzureCloudComputing
 
- Worker:
+#Worker:
  
   
 sudo vim /usr/lib/systemd/system/worker.service
@@ -24,7 +24,7 @@ ExecStart= sudo python3 worker.py
 Restart=always
 
 
- Webapp
+ #Webapp
   
 sudo vim /usr/lib/systemd/system/worker.service
 
@@ -47,7 +47,7 @@ ExecStart= sudo python3 worker.py
 Restart=always
 
 
- Niste comenzi:
+ #Niste comenzi:
   
 sudo systemctl daemon-reload
 
