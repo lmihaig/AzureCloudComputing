@@ -34,8 +34,8 @@ def upload():
             file_name = blob_name + ".wav"
             blob_client = blob_service_client.get_blob_client(container=config.BLOB_NAME, blob=file_name)
             blob_client.upload_blob(
-                audio_file,
-                content_settings=ContentSettings(content_disposition=f"attachment;filename=\"{file_name}\""))
+                audio_file, content_settings=ContentSettings(content_disposition=f'attachment;filename="{file_name}"')
+            )
             blob_url = blob_client.url
         except Exception:
             print("ERROR UPLOADING BLOB")
@@ -58,4 +58,4 @@ def upload():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0")
+    app.run(host="0.0.0.0", port=80)
